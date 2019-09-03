@@ -1,0 +1,69 @@
+{
+    "ProjectName": "Testing Only",
+    "Location": "101.1212, 112.1133",
+    "AverageRT": 0,
+    "Polls": [
+        {
+            "type": "TCP",
+            "host": "127.0.0.1",
+            "port": 502,
+            "Devices": [
+                {
+                    "name": "Device 4",
+                    "deviceNum": 1,
+                    "address": 1,
+                    "dataType": "int",
+                    "mod": "",
+                    "registerLength": 2,
+                    "registerType": 3,
+                    "registerBit": 16,
+                    "endian": "BE"
+                },
+                {
+                    "name": "Device 3",
+                    "deviceNum": 2,
+                    "address": 3,
+                    "dataType": "int",
+                    "mod": "",
+                    "registerLength": 2,
+                    "registerType": 3,
+                    "registerBit": 16,
+                    "endian": "BE"
+                }
+            ]
+        },
+        {
+            "type": "Serial", 
+            "protocol": "RTU",
+            "port": "COM5", 
+            "baudRate": 9600, 
+            "dataBits": 8, 
+            "stopBits": 1, 
+            "parity": "none", 
+            "Devices": [
+                {
+                    "name": "Device 1",
+                    "deviceNum": 1,
+                    "address": 1,
+                    "dataType": "int",
+                    "mod": "",
+                    "registerLength": 2,
+                    "registerType": 3,
+                    "registerBit": 16,
+                    "endian": "BE"
+                },
+                {
+                    "name": "Device 2",
+                    "deviceNum": 3,
+                    "address": 3,
+                    "dataType": "int",
+                    "mod": "",
+                    "registerLength": 2,
+                    "registerType": 3,
+                    "registerBit": 16,
+                    "endian": "BE"
+                }
+            ]
+        }
+    ]
+}
