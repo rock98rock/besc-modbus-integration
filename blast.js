@@ -2,9 +2,8 @@ require('dotenv').config()
 var fs = require("fs");
 var CronJob = require('cron').CronJob;
 var besc_client = require("besc-ess-nodejs-client");
-
+var formula= {};
 var jsBeautify = require('js-beautify').js;
-
 var configFile, config;
 
 var keypair = new besc_client.keyPair(process.env.PROJECT_ID, process.env.APIKEY);
@@ -22,8 +21,8 @@ else{
     host_client = besc_client.Host.createDefault();
 }
 
+
 var ModbusRTU = require("modbus-serial");
-var clients = {};
 var client = {};
 
 var fp = require('ieee-float');
@@ -223,7 +222,6 @@ const getDevicesReading = async (devices) => {
             var fetchedReading = await getMeterValue(device.deviceNum, device.registerLength, device.address, device.registerType);
 
             var meterValue;
-
             if (device.dataType.toLowerCase() === "int") {
 
                 switch (totalReadingBit) {
@@ -299,7 +297,7 @@ const getDevicesReading = async (devices) => {
                 meterValue = evaluate(device.mod, obj);
             }
 
-            var meterReading = { name: device.name, energy: meterValue };
+            var meterReading = { name: device.name, energy: meterValue};
 
             singlePollReading.push(meterReading);
 
@@ -322,7 +320,6 @@ const getDevicesReading = async (devices) => {
             }
         }
     }
-
     return singlePollReading;
 }
 
@@ -350,54 +347,81 @@ const getMeterValue = async (id, length, registerAddress, registerType) => {
     }
 }
 
-const calculateEnergy = async (devicesReading) => {
 
+const calculateEnergy = async (devicesReading) => {
     var newReading = [];
     var oldReading = [];
+    var finalReading = [];
+
+    var efficiency =0;
+    var TotalEfficiency=0;
+    //Get baseline reading from contract
+    const baseline = await besc_client.helper.getBaseline(host_client, keypair);
+
+    //Get formula from contract
+    formula = await besc_client.helper.getAllFormulas(host_client, keypair);
 
     if (fs.existsSync("./deviceData.json")) {
 
         try {
             var previousReading;
-
+            var BTUReading = 0;
+            
             var deviceData = fs.readFileSync("./deviceData.json");
             previousReading = JSON.parse(deviceData);
-
             oldReading = previousReading.Devices;
-
+            
             var previousReadingObj = oldReading.reduce((map, obj) => (map[obj.name] = obj.energy, map), {});
 
+            //Assign BTU value
             for (var x = 0; x < devicesReading.length; x++) {
-
-                var deviceReading = { name: devicesReading[x].name, energy: devicesReading[x].energy };
-
+                var deviceRead = { name: devicesReading[x].name, energy: devicesReading[x].energy };
+                if (previousReadingObj[deviceRead.name]) {
+                    if(deviceRead.name == "BTU"){
+                        BTUReading = deviceRead.energy;                
+                    }           
+                }
+                
+            }
+            
+            //Example Calculate Total Efficiency of devices
+            for (var x = 0; x < devicesReading.length; x++) {
+                var deviceReading = { name: devicesReading[x].name, energy: devicesReading[x].energy, Efficiency: efficiency};
                 if (previousReadingObj[deviceReading.name]) {
+                    try{
+                        if(deviceReading.name != "BTU"){
+                            formula["Efficiency"].applyFieldsValues({"Device": deviceReading.energy, "BTU": BTUReading});
+                            deviceReading.Efficiency = formulas["Efficiency"].calculate();
+                            if(deviceReading.Saved < 0){
+                                deviceReading.Saved = 0;
+                            }
+                        }
 
-                    var prevEnergy = previousReadingObj[deviceReading.name];
-
-                    deviceReading.energy = deviceReading.energy - prevEnergy;
-
-                    if (deviceReading.energy < 0) {
-                        deviceReading.energy = 0;
                     }
 
+                    catch(error){console.log(error);}
+                    
+                        if (deviceReading.energy < 0) {
+                            deviceReading.energy = 0;
+                        }
+                    
                     newReading.push(deviceReading);
+                    
                 }
                 else {
                     newReading.push(deviceReading);
                 }
+
             }
-
             var newReadingObj = newReading.reduce((map, obj) => (map[obj.name] = obj.energy, map), {});
-
             for (let deviceName in previousReadingObj) {
                 if (typeof newReadingObj[deviceName] === "undefined") {
-                    devicesReading.push({ name: deviceName, energy: previousReadingObj[deviceName] });
+                    devicesReading.push({ name: deviceName, Efficiency: previousReadingObj[deviceName] });
                 }
             }
 
         } catch (error) {
-            saveLog(error);
+            console.log(error);
             newReading = devicesReading;
         }
     }
@@ -405,32 +429,25 @@ const calculateEnergy = async (devicesReading) => {
         newReading = devicesReading;
     }
 
-    var formatedData = jsBeautify(JSON.stringify({ "Devices": devicesReading }));
+    //Write data into deviceData.json
+    var formatedData = jsBeautify(JSON.stringify({ "Devices": newReading }));
 
     const data = new Uint8Array(Buffer.from(formatedData));
 
     fs.writeFileSync('./deviceData.json', data);
 
-    return newReading;
+    return finalReading;
 }
 
-const sendData = async (devicesReading) => {
+const sendData = async (deviceReading) => {
 
     var reading = [];
-    var totalEnergy = 0;
 
-    for (var x = 0; x < devicesReading.length; x++) {
-
-        var deviceReading = devicesReading[x];
-
-        reading.push(new Device(deviceReading.name, deviceReading.energy));
-        totalEnergy += deviceReading.energy;
-    }
-
-    var projectData = ProjectData.creatWithCurrentTime(
+    reading.push(new Device(deviceReading.name, deviceReading.EnergyUsage, deviceReading.Saved, deviceReading.Efficiency, deviceReading.Formula));
+   
+    var projectData = ProjectData.createWithCurrentTime(
         config.ProjectName,
         reading,
-        totalEnergy,
         config.AverageRT,
         config.Location
     );
@@ -453,7 +470,6 @@ if(process.env.REPEAT_EVERY_MINUTES != parseInt(process.env.REPEAT_EVERY_MINUTES
 }
 
 var job = new CronJob(`*/${process.env.REPEAT_EVERY_MINUTES} * * * *`, async function () {
-
     try {
 
         try {
@@ -468,20 +484,25 @@ var job = new CronJob(`*/${process.env.REPEAT_EVERY_MINUTES} * * * *`, async fun
 
         var devicesReading = await getReading(config.Polls);
 
-        saveLog("\nDevices Reading:");
-        saveLog(devicesReading);
+        //console.log("\nDevices Reading:");
+        //console.log(devicesReading);
+        saveLog("\Devices Reading:");
+        saveLog(energyReading);
 
         var energyReading = await calculateEnergy(devicesReading);
 
+        //console.log("\nCalculated Reading:");
+        //console.log(energyReading);
         saveLog("\nCalculated Reading:");
         saveLog(energyReading);
 
-		if(!process.env.DISABLE_DATA_SEND){
-			var response = await sendData(energyReading);
-
-			saveLog("\nESS API Response:");
-			saveLog(response);
-		}
+        var response = await sendData(energyReading);
+        //console.log("\nESS API Response:");
+		//console.log(response);
+        saveLog("\ESS API Response:");
+        saveLog(response);
+		
+		
         
     } catch (error) {
         saveLog(`Throw at cronjob: ${error}`);
